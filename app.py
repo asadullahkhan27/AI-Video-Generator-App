@@ -1,7 +1,5 @@
-import io
-import requests
 import streamlit as st
-from PIL import Image
+from huggingface_hub import InferenceClient
 
 
 # ==========================================
@@ -16,52 +14,17 @@ st.set_page_config(
 
 
 # ==========================================
-# CUSTOM CSS
-# ==========================================
-
-st.markdown("""
-<style>
-
-.main-title {
-    text-align: center;
-    font-size: 42px;
-    font-weight: 700;
-    margin-bottom: 5px;
-}
-
-.subtitle {
-    text-align: center;
-    color: #777;
-    font-size: 18px;
-    margin-bottom: 30px;
-}
-
-.stButton > button {
-    width: 100%;
-    height: 50px;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-
-# ==========================================
 # HEADER
 # ==========================================
 
-st.markdown(
-    '<div class="main-title">AI Video Generator</div>',
-    unsafe_allow_html=True
+st.title("AI Video Generator")
+
+st.write(
+    "Generate an AI video from a reference image "
+    "and a cinematic text prompt."
 )
 
-st.markdown(
-    '<div class="subtitle">'
-    'Create AI videos from reference images and text prompts'
-    '</div>',
-    unsafe_allow_html=True
-)
+st.divider()
 
 
 # ==========================================
@@ -73,10 +36,10 @@ with st.sidebar:
     st.header("Video Settings")
 
     duration = st.selectbox(
-        "Duration",
+        "Video Duration",
         [
-            "5 seconds",
-            "10 seconds"
+            "Short",
+            "Medium"
         ]
     )
 
@@ -92,24 +55,24 @@ with st.sidebar:
     st.divider()
 
     st.info(
-        "Upload a reference image and describe "
-        "the motion you want to generate."
+        "Upload an image and describe the movement, "
+        "camera motion and visual style you want."
     )
 
 
 # ==========================================
-# INPUT SECTION
+# INPUT
 # ==========================================
 
-left, right = st.columns(2)
+col1, col2 = st.columns(2)
 
 
-with left:
+with col1:
 
     st.subheader("Reference Image")
 
-    uploaded_file = st.file_uploader(
-        "Upload Image",
+    uploaded_image = st.file_uploader(
+        "Upload your image",
         type=[
             "png",
             "jpg",
@@ -118,105 +81,56 @@ with left:
         ]
     )
 
-    if uploaded_file:
-
-        image = Image.open(uploaded_file).convert("RGB")
+    if uploaded_image:
 
         st.image(
-            image,
+            uploaded_image,
             caption="Reference Image",
             use_container_width=True
         )
 
 
-with right:
+with col2:
 
     st.subheader("Video Prompt")
 
     prompt = st.text_area(
         "Describe your video",
+        height=220,
         placeholder=(
-            "Example: A cinematic couple walking together "
-            "during sunset, realistic movement, natural "
-            "facial expressions, smooth camera movement, "
-            "cinematic lighting."
-        ),
-        height=200
+            "A cinematic Pakistani couple walking "
+            "together during sunset, natural body movement, "
+            "realistic facial expressions, gentle wind, "
+            "smooth camera movement, cinematic lighting, "
+            "photorealistic."
+        )
     )
 
     negative_prompt = st.text_area(
         "Negative Prompt",
-        placeholder=(
-            "blurry, distorted face, extra fingers, "
-            "deformed body, low quality"
-        ),
-        height=100
-    )
-
-
-# ==========================================
-# GENERATION FUNCTION
-# ==========================================
-
-def generate_video(image_bytes, prompt):
-
-    # Hugging Face token stored in Streamlit Secrets
-    token = st.secrets.get("HF_TOKEN", "")
-
-    if not token:
-
-        raise Exception(
-            "HF_TOKEN is missing from Streamlit Secrets."
+        height=100,
+        value=(
+            "blurry, distorted face, deformed body, "
+            "extra fingers, extra limbs, low quality, "
+            "flickering, unnatural movement"
         )
-
-    # Model endpoint
-    model_url = (
-        "https://api-inference.huggingface.co/models/"
-        "stabilityai/stable-video-diffusion-img2vid-xt"
     )
 
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-
-    response = requests.post(
-        model_url,
-        headers=headers,
-        data=image_bytes,
-        timeout=600
-    )
-
-    if response.status_code != 200:
-
-        try:
-            error = response.json()
-        except Exception:
-            error = response.text
-
-        raise Exception(str(error))
-
-    return response.content
-
-
-# ==========================================
-# GENERATE BUTTON
-# ==========================================
 
 st.divider()
 
-generate_button = st.button(
+
+# ==========================================
+# GENERATE VIDEO
+# ==========================================
+
+if st.button(
     "Generate AI Video",
-    type="primary"
-)
+    type="primary",
+    use_container_width=True
+):
 
-
-if generate_button:
-
-    # --------------------------------------
-    # Validation
-    # --------------------------------------
-
-    if uploaded_file is None:
+    if uploaded_image is None:
 
         st.error(
             "Please upload a reference image."
@@ -234,9 +148,36 @@ if generate_button:
         st.stop()
 
 
-    # --------------------------------------
-    # Generation
-    # --------------------------------------
+    # ======================================
+    # HF TOKEN
+    # ======================================
+
+    try:
+
+        hf_token = st.secrets["HF_TOKEN"]
+
+    except Exception:
+
+        st.error(
+            "HF_TOKEN is missing from Streamlit Secrets."
+        )
+
+        st.stop()
+
+
+    # ======================================
+    # CREATE CLIENT
+    # ======================================
+
+    client = InferenceClient(
+        provider="auto",
+        api_key=hf_token
+    )
+
+
+    # ======================================
+    # GENERATE
+    # ======================================
 
     progress = st.progress(0)
 
@@ -245,53 +186,64 @@ if generate_button:
     try:
 
         status.info(
-            "Preparing your reference image..."
+            "Preparing reference image..."
         )
 
         progress.progress(15)
 
-        image_bytes = uploaded_file.getvalue()
+        image_bytes = uploaded_image.getvalue()
 
         status.info(
-            "Sending image to the AI video model..."
+            "Sending image and prompt to AI video model..."
         )
 
         progress.progress(30)
 
-        video_bytes = generate_video(
-            image_bytes,
-            prompt
+        video = client.image_to_video(
+            image=image_bytes,
+            model="Wan-AI/Wan2.2-I2V-A14B",
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            num_frames=81,
+            num_inference_steps=30
         )
 
         progress.progress(90)
 
         status.info(
-            "Preparing generated video..."
+            "Preparing final MP4..."
         )
 
         progress.progress(100)
 
         status.success(
-            "Video generated successfully!"
+            "AI video generated successfully!"
         )
 
-        # ----------------------------------
-        # Output
-        # ----------------------------------
+
+        # ==================================
+        # VIDEO OUTPUT
+        # ==================================
 
         st.subheader("Generated Video")
 
-        st.video(video_bytes)
+        st.video(video)
+
+
+        # ==================================
+        # DOWNLOAD
+        # ==================================
 
         st.download_button(
             label="Download AI Video",
-            data=video_bytes,
-            file_name="generated_video.mp4",
+            data=video,
+            file_name="ai_generated_video.mp4",
             mime="video/mp4",
             use_container_width=True
         )
 
-    except Exception as error:
+
+    except Exception as e:
 
         progress.empty()
 
@@ -299,4 +251,4 @@ if generate_button:
             "Video generation failed."
         )
 
-        st.error(str(error))
+        st.error(str(e))
