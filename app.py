@@ -1,8 +1,12 @@
-import streamlit as st
+import io
 import requests
-import os
-import time
+import streamlit as st
 from PIL import Image
+
+
+# ==========================================
+# PAGE CONFIG
+# ==========================================
 
 st.set_page_config(
     page_title="AI Video Generator",
@@ -10,95 +14,113 @@ st.set_page_config(
     layout="wide"
 )
 
-# -----------------------------
-# Custom CSS
-# -----------------------------
+
+# ==========================================
+# CUSTOM CSS
+# ==========================================
+
 st.markdown("""
 <style>
-    .main-title {
-        font-size: 42px;
-        font-weight: 700;
-        text-align: center;
-        margin-bottom: 10px;
-    }
 
-    .subtitle {
-        text-align: center;
-        color: #777;
-        font-size: 18px;
-        margin-bottom: 35px;
-    }
+.main-title {
+    text-align: center;
+    font-size: 42px;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
 
-    .generate-box {
-        padding: 25px;
-        border-radius: 15px;
-        border: 1px solid #ddd;
-    }
+.subtitle {
+    text-align: center;
+    color: #777;
+    font-size: 18px;
+    margin-bottom: 30px;
+}
+
+.stButton > button {
+    width: 100%;
+    height: 50px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-# -----------------------------
-# Header
-# -----------------------------
+
+# ==========================================
+# HEADER
+# ==========================================
+
 st.markdown(
     '<div class="main-title">AI Video Generator</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
-    '<div class="subtitle">Generate videos from text prompts and reference images</div>',
+    '<div class="subtitle">'
+    'Create AI videos from reference images and text prompts'
+    '</div>',
     unsafe_allow_html=True
 )
 
-# -----------------------------
-# Sidebar
-# -----------------------------
+
+# ==========================================
+# SIDEBAR
+# ==========================================
+
 with st.sidebar:
 
-    st.header("Settings")
+    st.header("Video Settings")
 
-    video_duration = st.selectbox(
-        "Video Duration",
-        ["5 seconds", "10 seconds"]
+    duration = st.selectbox(
+        "Duration",
+        [
+            "5 seconds",
+            "10 seconds"
+        ]
     )
 
     aspect_ratio = st.selectbox(
         "Aspect Ratio",
-        ["16:9", "9:16", "1:1"]
-    )
-
-    model = st.selectbox(
-        "AI Model",
         [
-            "Video Generation Model",
-            "Image-to-Video Model"
+            "16:9",
+            "9:16",
+            "1:1"
         ]
     )
 
     st.divider()
 
     st.info(
-        "Upload a reference image and describe the motion "
-        "you want in your video."
+        "Upload a reference image and describe "
+        "the motion you want to generate."
     )
 
-# -----------------------------
-# Main UI
-# -----------------------------
-col1, col2 = st.columns(2)
 
-with col1:
+# ==========================================
+# INPUT SECTION
+# ==========================================
+
+left, right = st.columns(2)
+
+
+with left:
 
     st.subheader("Reference Image")
 
-    uploaded_image = st.file_uploader(
-        "Upload an image",
-        type=["png", "jpg", "jpeg"]
+    uploaded_file = st.file_uploader(
+        "Upload Image",
+        type=[
+            "png",
+            "jpg",
+            "jpeg",
+            "webp"
+        ]
     )
 
-    if uploaded_image:
+    if uploaded_file:
 
-        image = Image.open(uploaded_image)
+        image = Image.open(uploaded_file).convert("RGB")
 
         st.image(
             image,
@@ -106,86 +128,175 @@ with col1:
             use_container_width=True
         )
 
-with col2:
+
+with right:
 
     st.subheader("Video Prompt")
 
     prompt = st.text_area(
         "Describe your video",
         placeholder=(
-            "Example: A cinematic Pakistani couple walking "
-            "together on a beautiful street during sunset, "
-            "natural movement, realistic camera motion..."
+            "Example: A cinematic couple walking together "
+            "during sunset, realistic movement, natural "
+            "facial expressions, smooth camera movement, "
+            "cinematic lighting."
         ),
-        height=220
+        height=200
     )
 
     negative_prompt = st.text_area(
         "Negative Prompt",
-        placeholder="blurry, distorted face, extra fingers, low quality..."
+        placeholder=(
+            "blurry, distorted face, extra fingers, "
+            "deformed body, low quality"
+        ),
+        height=100
     )
 
-# -----------------------------
-# Generate Button
-# -----------------------------
+
+# ==========================================
+# GENERATION FUNCTION
+# ==========================================
+
+def generate_video(image_bytes, prompt):
+
+    # Hugging Face token stored in Streamlit Secrets
+    token = st.secrets.get("HF_TOKEN", "")
+
+    if not token:
+
+        raise Exception(
+            "HF_TOKEN is missing from Streamlit Secrets."
+        )
+
+    # Model endpoint
+    model_url = (
+        "https://api-inference.huggingface.co/models/"
+        "stabilityai/stable-video-diffusion-img2vid-xt"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    response = requests.post(
+        model_url,
+        headers=headers,
+        data=image_bytes,
+        timeout=600
+    )
+
+    if response.status_code != 200:
+
+        try:
+            error = response.json()
+        except Exception:
+            error = response.text
+
+        raise Exception(str(error))
+
+    return response.content
+
+
+# ==========================================
+# GENERATE BUTTON
+# ==========================================
+
 st.divider()
 
-generate = st.button(
+generate_button = st.button(
     "Generate AI Video",
-    type="primary",
-    use_container_width=True
+    type="primary"
 )
 
-# -----------------------------
-# Generation
-# -----------------------------
-if generate:
+
+if generate_button:
+
+    # --------------------------------------
+    # Validation
+    # --------------------------------------
+
+    if uploaded_file is None:
+
+        st.error(
+            "Please upload a reference image."
+        )
+
+        st.stop()
+
 
     if not prompt.strip():
-        st.error("Please enter a video prompt.")
+
+        st.error(
+            "Please enter a video prompt."
+        )
+
         st.stop()
 
-    if uploaded_image is None:
-        st.warning("Please upload a reference image.")
-        st.stop()
 
-    os.makedirs("outputs", exist_ok=True)
+    # --------------------------------------
+    # Generation
+    # --------------------------------------
 
     progress = st.progress(0)
 
     status = st.empty()
 
-    status.info("Preparing your video generation...")
+    try:
 
-    for i in range(1, 101):
+        status.info(
+            "Preparing your reference image..."
+        )
 
-        time.sleep(0.03)
+        progress.progress(15)
 
-        progress.progress(i)
+        image_bytes = uploaded_file.getvalue()
 
-        if i < 30:
-            status.info("Analyzing reference image...")
+        status.info(
+            "Sending image to the AI video model..."
+        )
 
-        elif i < 60:
-            status.info("Generating video frames...")
+        progress.progress(30)
 
-        elif i < 90:
-            status.info("Applying motion and camera movement...")
+        video_bytes = generate_video(
+            image_bytes,
+            prompt
+        )
 
-        else:
-            status.info("Finalizing video...")
+        progress.progress(90)
 
-    status.success("Video generation completed.")
+        status.info(
+            "Preparing generated video..."
+        )
 
-    st.info(
-        "The Streamlit interface is ready. "
-        "Next, connect this button to your actual AI video model/API."
-    )
+        progress.progress(100)
 
-    # Demo output placeholder
-    st.subheader("Generated Video")
+        status.success(
+            "Video generated successfully!"
+        )
 
-    st.warning(
-        "AI model/API is not connected yet. "
-        "This section will display the generated MP4 once the model is connected."
-    )
+        # ----------------------------------
+        # Output
+        # ----------------------------------
+
+        st.subheader("Generated Video")
+
+        st.video(video_bytes)
+
+        st.download_button(
+            label="Download AI Video",
+            data=video_bytes,
+            file_name="generated_video.mp4",
+            mime="video/mp4",
+            use_container_width=True
+        )
+
+    except Exception as error:
+
+        progress.empty()
+
+        status.error(
+            "Video generation failed."
+        )
+
+        st.error(str(error))
